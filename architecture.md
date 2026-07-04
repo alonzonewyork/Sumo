@@ -231,24 +231,24 @@ granularity.
 **`bout`** — one row per match (the fact table)
 | column       | type    | key | notes |
 |--------------|---------|-----|-------|
-| id           | INTEGER | PK  | surrogate autoincrement |
-| basho_id     | TEXT    | FK→basho | |
-| division     | TEXT    |     | |
-| day          | INTEGER |     | 1–15 |
-| match_no     | INTEGER |     | order within the day/division |
+| basho_id     | VARCHAR | PK, FK→basho | |
+| division     | VARCHAR | PK  | |
+| day          | INTEGER | PK  | 1–15 |
+| match_no     | INTEGER | PK  | order within the day/division |
 | east_id      | INTEGER | FK→rikishi | |
-| east_shikona | TEXT    |     | snapshot |
-| east_rank    | TEXT    |     | snapshot |
+| east_shikona | VARCHAR |     | snapshot |
+| east_rank    | VARCHAR |     | snapshot |
 | west_id      | INTEGER | FK→rikishi | |
-| west_shikona | TEXT    |     | snapshot |
-| west_rank    | TEXT    |     | snapshot |
-| kimarite     | TEXT    | FK→kimarite | NULL for fusen/no-contest |
+| west_shikona | VARCHAR |     | snapshot |
+| west_rank    | VARCHAR |     | snapshot |
+| kimarite     | VARCHAR | FK→kimarite | NULL for fusen/no-contest |
 | winner_id    | INTEGER | FK→rikishi | NULL if none |
-| winner_en    | TEXT    |     | snapshot |
-| winner_jp    | TEXT    |     | snapshot |
+| winner_en    | VARCHAR |     | snapshot |
+| winner_jp    | VARCHAR |     | snapshot |
 
-Natural uniqueness: `(basho_id, division, day, match_no)` → UNIQUE index for
-idempotent upserts.
+Primary key is the natural composite `(basho_id, division, day, match_no)` —
+this is stable and makes re-loading idempotent (`INSERT OR REPLACE`), so no
+surrogate id / sequence is needed.
 
 **`kimarite`** — winning-technique reference
 | column     | type    | key | notes |
@@ -346,11 +346,18 @@ idempotent upserts.
 
 | Choice | What | Why |
 |--------|------|-----|
-| Language | **Python 3** (stdlib `sqlite3`, `urllib`/`requests`, `json`, `time`) | ubiquitous, readable, great SQLite support, no heavy deps for research code |
-| Store | **SQLite** (single `sumo.db` file) | zero-setup, file-based, perfect for a single-user analytical dataset; easy to back up / share |
+| Language | **Python 3** (`duckdb` package, `urllib`/`requests`, `json`, `time`) | ubiquitous, readable, first-class DuckDB Python API, no heavy deps for research code |
+| Store | **DuckDB** (single `sumo.duckdb` file) | file-based like SQLite but columnar and analytics-oriented (fast aggregations/joins over the bout fact table); **matches the storage engine used by my other sumo repos** so datasets and queries are interchangeable |
 | Cache | **on-disk JSON cache** under `cache/`, keyed by a slug of the request URL | makes re-runs free and offline; the raw record of truth before normalization |
 | Migrations | a single `schema.sql` run with `CREATE TABLE IF NOT EXISTS` | research code — no migration framework needed |
-| Deps | keep minimal; `requests` optional, else stdlib `urllib` | fewer moving parts |
+| Deps | `duckdb`; `requests` optional, else stdlib `urllib` | fewer moving parts |
+
+**Type conventions in the tables above:** written in shorthand — in the DuckDB
+DDL, `TEXT` maps to `VARCHAR` (DuckDB accepts `TEXT` as an alias), `REAL` maps
+to `DOUBLE`, and `INTEGER` stays `INTEGER`. Idempotent loads use DuckDB's
+`INSERT OR REPLACE INTO` (or `INSERT ... ON CONFLICT DO UPDATE`) against the
+primary keys defined per table — no sequences/autoincrement needed since every
+table has a natural key.
 
 Layout:
 ```
@@ -361,7 +368,7 @@ Sumo/
 ├── extract.py               ← gentle extractor + loader (Step 4)
 ├── queries.sql              ← sanity-check queries (Step 5)
 ├── cache/                   ← raw JSON responses, URL-keyed (gitignored)
-└── sumo.db                  ← SQLite output (gitignored)
+└── sumo.duckdb              ← DuckDB output (gitignored)
 ```
 
 ---
