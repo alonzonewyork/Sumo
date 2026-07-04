@@ -32,15 +32,14 @@ offline. **Steps 4b, 5, and 6 require the API to be reachable.**
 - [ ] **2b. Plan review approved by user**
 
 ## Step 3 — Create the DuckDB schema (offline, safe)
-- [ ] **3a. Write `schema.sql`** — DDL for all tables in `architecture.md` §4
+- [x] **3a. Write `schema.sql`** — DDL for all tables in `architecture.md` §4
   (rikishi, basho, basho_yusho, special_prize, banzuke_entry, bout, kimarite,
   rank_history, shikona_history, measurement_history, rikishi_stats, fetch_log)
   using `CREATE TABLE IF NOT EXISTS`, DuckDB types, natural PKs.
-- [ ] **3b. Write `init_db.py`** (or a small function in `extract.py`) that
-  creates `sumo.duckdb` from `schema.sql`.
-- [ ] **3c. Run it; verify all tables exist and are empty** (`SHOW TABLES`,
-  `DESCRIBE` each). No network needed.
-- [ ] **3d. Show schema result to user for review.**
+- [x] **3b. Write `init_db.py`** that creates `sumo.duckdb` from `schema.sql`.
+- [x] **3c. Run it; verify all tables exist and are empty** — 12 tables created,
+  PKs correct (bout composite of 4, banzuke_entry of 2), re-run idempotent.
+- [~] **3d. Show schema result to user for review.**
 
 ## Step 4 — Extraction script + SMALL test run
 - [ ] **4a. Write `extract.py` with all gentle-API safeguards (offline-buildable):**
@@ -104,4 +103,8 @@ offline. **Steps 4b, 5, and 6 require the API to be reachable.**
   — to be reconciled against real JSON during the Step 4 test run. Switched
   storage from SQLite to DuckDB at user request (match other repos). Architecture
   approved.
-- **2026-07-04** — Step 2: `plan.md` written (this file). Awaiting review.
+- **2026-07-04** — Step 2: `plan.md` written (this file). Approved.
+- **2026-07-04** — Step 3: `schema.sql` + `init_db.py` written; `.gitignore`
+  added (DB + cache not committed). Ran init: 12 tables created in
+  `sumo.duckdb`, all empty, PKs verified, re-run idempotent. Installed `duckdb`
+  1.5.4. Awaiting schema review. (Still offline — no API traffic yet.)
