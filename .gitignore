@@ -1,0 +1,9 @@
+# Generated data — not committed (research artifacts, regenerable)
+sumo.duckdb
+sumo.duckdb.wal
+cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
