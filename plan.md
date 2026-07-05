@@ -42,19 +42,21 @@ offline. **Steps 4b, 5, and 6 require the API to be reachable.**
 - [~] **3d. Show schema result to user for review.**
 
 ## Step 4 — Extraction script + SMALL test run
-- [ ] **4a. Write `extract.py` with all gentle-API safeguards (offline-buildable):**
-  - [ ] config constants: `BASE_URL`, `REQUEST_DELAY_SECONDS = 1.5`,
+- [x] **4a. Write `extract.py` with all gentle-API safeguards (offline-buildable):**
+  - [x] config constants: `BASE_URL`, `REQUEST_DELAY_SECONDS = 1.5`,
     `USER_AGENT`, `MAX_RETRIES = 3`, `CACHE_DIR`, `DB_PATH`
-  - [ ] `fetch(url)`: check disk cache → return cached JSON if present;
-    otherwise sleep(delay), GET with UA, handle 429/`Retry-After`, retry with
-    exponential backoff (2/4/8s), write raw JSON to `cache/`, record in
-    `fetch_log`, log progress
-  - [ ] small, commented loader functions per entity that upsert into DuckDB
-    (`INSERT OR REPLACE`), reading from the cached JSON
-  - [ ] CLI flags to scope a run: `--basho <id>`, `--rikishi <id>`,
-    `--divisions`, `--test` (tiny run), `--full` (guarded; refuses without an
-    explicit confirm flag)
-  - [ ] resumable: cache hits + upserts make re-runs continue where they left off
+  - [x] `fetch_json(url)`: cache-first; else sleep(delay), GET with UA, handle
+    429/`Retry-After`, retry with exponential backoff (2/4/8s), write raw JSON
+    to `cache/`, record in `fetch_log`, log progress
+  - [x] small, commented loader functions per entity that upsert into DuckDB
+    (`INSERT OR REPLACE`), reading from cached JSON; `pick()` tolerates
+    field-name variants while fields are UNVERIFIED
+  - [x] CLI flags: `--test`, `--basho <id>`, `--rikishi <id>`, `--full`
+    (guarded — refuses without `--yes-full`)
+  - [x] resumable: cache hits + upserts make re-runs continue where they left off
+  - [x] **offline plumbing test** (synthetic cache → run_test): every table
+    populated, composite PKs hold, idempotent on re-run, field-name variant
+    (`rikishiID`) handled. Guards verified.
 - [ ] **4b. SMALL TEST RUN** *(requires network — G)*: one recent basho
   (e.g. `202305`) across divisions + a handful of rikishi + kimarite list.
   Populate the DB from cache. Keep the request count tiny.
@@ -107,4 +109,10 @@ offline. **Steps 4b, 5, and 6 require the API to be reachable.**
 - **2026-07-04** — Step 3: `schema.sql` + `init_db.py` written; `.gitignore`
   added (DB + cache not committed). Ran init: 12 tables created in
   `sumo.duckdb`, all empty, PKs verified, re-run idempotent. Installed `duckdb`
-  1.5.4. Awaiting schema review. (Still offline — no API traffic yet.)
+  1.5.4. Schema approved.
+- **2026-07-04** — Step 4a: `extract.py` written with all gentle-API safeguards
+  (cache-first fetch, 1.5s delay, backoff, 429 handling, fetch_log, per-entity
+  loaders, CLI + `--full` guard). Validated the full pipeline OFFLINE with a
+  synthetic cache: all 12 tables populate, PKs/idempotency hold. No real API
+  traffic yet. **Step 4b (live test run) is blocked on item G** — `sumo-api.com`
+  must be unblocked in the environment network policy.
