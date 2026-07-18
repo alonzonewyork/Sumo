@@ -1,4 +1,6 @@
-# Generated data — not committed (research artifacts, regenerable)
+# Local, regenerable artifacts -- parquet/ is the git-tracked source of
+# truth (see export_parquet.py / import_parquet.py); sumo.duckdb is rebuilt
+# from it and cache/ is the raw per-URL API cache, neither is committed.
 sumo.duckdb
 sumo.duckdb.wal
 cache/

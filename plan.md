@@ -116,8 +116,13 @@ offline. **Steps 4b, 5, and 6 require the API to be reachable.**
     (Nagoya) tournament, whose later days haven't been fought yet.
 - [ ] **6d. Load everything into DuckDB from cache; run `queries.sql` for final
   validation; report final row counts.**
-- [ ] **6e. Commit final artifacts** (code + schema + queries; NOT the DB/cache —
-  gitignored). Report completion.
+- [ ] **6e. Run `export_parquet.py`** to refresh `parquet/` (the git-tracked
+  source of truth — one file per table, via DuckDB's native `EXPORT DATABASE`)
+  from the freshly-loaded `sumo.duckdb`. Commit final artifacts: code, schema,
+  queries, **and `parquet/`** (2026-07-18 decision — reversed from the
+  original "DB not committed" call; `sumo.duckdb` itself and `cache/` stay
+  gitignored and regenerable, `sumo.duckdb` via `import_parquet.py`). Report
+  completion.
 
 ## Step 7 — Per-wrestler stats backfill (only after Step 6 is fully done)
 - [ ] **7a. Confirm Step 6 finished cleanly** (final row counts reviewed, 6e

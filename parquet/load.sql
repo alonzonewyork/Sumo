@@ -1,0 +1,12 @@
+COPY banzuke_entry FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/banzuke_entry.parquet' (FORMAT 'parquet');
+COPY basho FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/basho.parquet' (FORMAT 'parquet');
+COPY basho_yusho FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/basho_yusho.parquet' (FORMAT 'parquet');
+COPY bout FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/bout.parquet' (FORMAT 'parquet');
+COPY fetch_log FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/fetch_log.parquet' (FORMAT 'parquet');
+COPY kimarite FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/kimarite.parquet' (FORMAT 'parquet');
+COPY measurement_history FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/measurement_history.parquet' (FORMAT 'parquet');
+COPY rank_history FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/rank_history.parquet' (FORMAT 'parquet');
+COPY rikishi FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/rikishi.parquet' (FORMAT 'parquet');
+COPY rikishi_stats FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/rikishi_stats.parquet' (FORMAT 'parquet');
+COPY shikona_history FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/shikona_history.parquet' (FORMAT 'parquet');
+COPY special_prize FROM '/Users/craigohare/Documents/Repos/Sumo/parquet/special_prize.parquet' (FORMAT 'parquet');
