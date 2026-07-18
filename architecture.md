@@ -5,23 +5,26 @@
 
 ---
 
-## ⚠️ Verification caveat (read first)
+## ⚠️ Verification status — reconciled against the live API (2026-07-05)
 
-The Sumo-API host (`www.sumo-api.com`) is currently **blocked by this
-environment's outbound network policy**, so I could not read the live
-`/api-guide` page or make a single real call while drafting this document.
+This document was originally drafted while `www.sumo-api.com` was blocked by
+the environment's network policy, so the field lists below were reconstructed
+from prior knowledge and marked **(UNVERIFIED)**. In a later working
+environment the API was reachable, and every endpoint used by the extractor
+(3.1, 3.2, 3.3, 3.4/3.8, 3.6, 3.7, 3.9, 3.11–3.13) was sampled live and
+matched the field lists below **exactly**, with three corrections (now fixed
+in `extract.py` and noted inline where relevant):
 
-Everything below marked **(UNVERIFIED)** is reconstructed from prior knowledge
-of the Sumo-API plus web-search corroboration of the *endpoint list*. The
-**endpoint paths and the general data model are trustworthy**; the **exact
-response field names and JSON nesting are not yet confirmed**. The extraction
-script (Step 4) is deliberately designed to **dump raw JSON to disk first**, so
-that once the API is reachable we can diff real responses against the field
-lists here and correct the schema before loading anything.
+1. `rikishi/{id}/stats` → `sansho` is a per-prize-type **object**
+   (`{"Gino-sho":1,"Kanto-sho":3,"Shukun-sho":2}`), not a scalar count.
+2. `GET /kimarite` requires a `sortField` query param (`count`/`kimarite`/
+   `lastUsage`) — omitting it returns an error object, not records.
+3. A nonexistent `bashoId` (e.g. `195801`) returns **HTTP 200 with a blank
+   stub** (`"date": ""`, `0001-01-01` placeholder dates), not a 404.
 
-**Action item before Step 3 (schema creation):** unblock `sumo-api.com` in the
-environment network policy, fetch one sample response per endpoint, and
-reconcile the "Raw shape" sections below with reality.
+See `plan.md`'s 2026-07-05 progress log entry for the full reconciliation
+notes. The "(UNVERIFIED)" tags below are now historical — left in place as a
+record of what was confirmed rather than removed.
 
 ---
 
@@ -413,13 +416,23 @@ afterthought**:
 
 ---
 
-## 8. Open questions to resolve once the API is reachable
-1. Confirm exact response envelopes and field names for every endpoint in §3
-   (the UNVERIFIED items) against real JSON; fix schema accordingly.
-2. Confirm the `limit`/`skip` paging cap on `/rikishis` and `/kimarite`.
-3. Confirm how absences / fusen (default) wins appear in a bout (`kimarite`
-   value? `winnerId` = 0/null?).
-4. Confirm the earliest available `bashoId` (expected `195801`) and whether
-   lower divisions have complete torikumi that far back.
-5. Confirm `basho` summary field name for the id (`date` vs `bashoId`).
+## 8. Open questions — resolved 2026-07-05, kept for history
+1. ✅ Confirmed exact response envelopes/field names for every endpoint the
+   extractor uses (see verification status note above); 3 mismatches found
+   and fixed (`sansho` shape, `/kimarite` `sortField` requirement, blank-stub
+   basho detection).
+2. ⏳ Still open — the paging cap on `/rikishis`/`/kimarite` wasn't tested at
+   scale (only `limit=10`/`limit=1000` samples so far); revisit during the
+   Step 6 full pull if a page request comes back truncated unexpectedly.
+3. ✅ Confirmed: a fusen (walkover) win has `kimarite: "fusen"` with a normal,
+   non-null `winnerId` — no special-casing needed in the loader.
+4. ✅ Partially confirmed: `195801` (Jan 1958) does **not** exist — the first
+   basho of the 6/year format that year was `195803` (March); `195803`
+   through `195811` and the current in-progress `202607` all returned real
+   data. Whether *lower divisions* have complete torikumi all the way back to
+   `195803` is still unconfirmed — revisit during Step 6.
+5. ✅ Confirmed: the basho summary's id field is `date` (e.g. `"date":
+   "202305"`), not `bashoId`. Doesn't affect the loader, since `load_basho`
+   already uses the requested `basho_id` parameter rather than reading it
+   back from the response.
 ```

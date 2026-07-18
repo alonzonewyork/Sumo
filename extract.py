@@ -39,6 +39,7 @@ CACHE_DIR = HERE / "cache"
 DB_PATH = HERE / "sumo.duckdb"
 
 DIVISIONS = ["Makuuchi", "Juryo", "Makushita", "Sandanme", "Jonidan", "Jonokuchi"]
+FULL_PULL_DIVISIONS = ["Makuuchi", "Juryo"]  # scope approved for Step 6 (2026-07); can widen to DIVISIONS later to backfill lower divisions
 BASHO_DAYS = range(1, 16)            # a tournament runs 15 days
 FIRST_BASHO_YEAR = 1958             # historical data starts here
 BASHO_MONTHS = [1, 3, 5, 7, 9, 11]   # 6 tournaments/year, odd months
@@ -169,10 +170,18 @@ def load_rikishi_by_id(con, rikishi_id):
     load_rikishi_stats(con, rikishi_id)
 
 
-def load_rikishi_list(con, limit=10, skip=0):
-    """Fetch a page of rikishi (with embedded history) and load each."""
+def load_rikishi_list(con, limit=10, skip=0, intai=None):
+    """Fetch a page of rikishi (with embedded history) and load each.
+
+    `intai` selects active (False) vs retired (True) wrestlers; the API
+    defaults to active-only (intai=False) if omitted — retired rikishi
+    (the vast majority of all-time history) are a separate bucket and must
+    be crawled explicitly, or they're silently missed.
+    """
     url = (f"{BASE_URL}/rikishis?limit={limit}&skip={skip}"
            "&measurements=true&ranks=true&shikonas=true")
+    if intai is not None:
+        url += f"&intai={'true' if intai else 'false'}"
     data = fetch_json(con, url)
     records = data.get("records", []) if isinstance(data, dict) else data
     for r in records:
@@ -185,6 +194,9 @@ def load_rikishi_stats(con, rikishi_id):
     s = fetch_json(con, f"{BASE_URL}/rikishi/{rikishi_id}/stats")
     if not isinstance(s, dict):
         return
+    sansho = pick(s, "sansho")
+    if isinstance(sansho, dict):          # real shape: per-prize-type breakdown
+        sansho = sum(v for v in sansho.values() if isinstance(v, (int, float)))
     upsert(con, "rikishi_stats", {
         "rikishi_id": rikishi_id,
         "total_matches": pick(s, "totalMatches"),
@@ -193,15 +205,21 @@ def load_rikishi_stats(con, rikishi_id):
         "total_absences": pick(s, "totalAbsences"),
         "total_basho": pick(s, "totalBasho", "basho"),
         "yusho": pick(s, "yusho"),
-        "sansho": pick(s, "sansho"),
+        "sansho": sansho,
     })
 
 
 def load_basho(con, basho_id):
-    """Fetch a tournament summary; upsert basho, yusho winners, special prizes."""
+    """Fetch a tournament summary; upsert basho, yusho winners, special prizes.
+
+    Returns True if the basho exists, False if it doesn't (and upserts
+    nothing). Nonexistent basho aren't 404s — the API answers 200 with a
+    blank stub ("date": "", "0001-01-01" dates), so that's what we detect.
+    """
     b = fetch_json(con, f"{BASE_URL}/basho/{basho_id}")
-    if not isinstance(b, dict):
-        return
+    if not isinstance(b, dict) or not pick(b, "date", "bashoId"):
+        log.info("basho %s does not exist (blank stub response); skipping", basho_id)
+        return False
     upsert(con, "basho", {
         "basho_id": basho_id,
         "start_date": pick(b, "startDate"),
@@ -218,6 +236,7 @@ def load_basho(con, basho_id):
             "basho_id": basho_id, "prize_type": pick(p, "type"),
             "rikishi_id": pick(p, "rikishiId"),
             "shikona_en": pick(p, "shikonaEn"), "shikona_jp": pick(p, "shikonaJp")})
+    return True
 
 
 def load_banzuke(con, basho_id, division):
@@ -258,7 +277,8 @@ def load_torikumi(con, basho_id, division, day):
 
 def load_kimarite(con, limit=1000):
     """Fetch kimarite usage stats and seed the reference table."""
-    data = fetch_json(con, f"{BASE_URL}/kimarite?limit={limit}")
+    # sortField is required — omitting it makes the API return an error object
+    data = fetch_json(con, f"{BASE_URL}/kimarite?limit={limit}&sortField=count&sortOrder=desc")
     records = data.get("records", []) if isinstance(data, dict) else data
     for k in records or []:
         name = pick(k, "kimarite")
@@ -271,7 +291,8 @@ def load_kimarite(con, limit=1000):
 
 def load_basho_full(con, basho_id, divisions=DIVISIONS):
     """Everything for one tournament: summary + banzuke + torikumi (all days)."""
-    load_basho(con, basho_id)
+    if not load_basho(con, basho_id):
+        return
     for div in divisions:
         load_banzuke(con, basho_id, div)
         for day in BASHO_DAYS:
@@ -307,20 +328,30 @@ def run_test(con):
 
 
 def run_full(con):
-    """Full historical pull — sequential, cache-first, resumable (Step 6)."""
-    basho_ids = enumerate_basho_ids()
-    log.info("== FULL PULL: %d basho, %d divisions ==", len(basho_ids), len(DIVISIONS))
+    """Full historical pull — sequential, cache-first, resumable (Step 6).
+
+    Scoped to FULL_PULL_DIVISIONS (Makuuchi + Juryo) per the approved scope —
+    widen to DIVISIONS to backfill lower divisions later.
+    """
+    basho_ids = enumerate_basho_ids()[::-1]  # newest-first: recent basho are the
+    # most-used data, so they land first if this ~5-6hr crawl gets interrupted
+    log.info("== FULL PULL: %d basho, %d divisions ==",
+             len(basho_ids), len(FULL_PULL_DIVISIONS))
     load_kimarite(con)
     for i, bid in enumerate(basho_ids, 1):
         log.info("[%d/%d] basho %s", i, len(basho_ids), bid)
-        load_basho_full(con, bid)
-    # rikishi crawl (paged) with embedded history
-    skip, page = 0, 1000
-    while True:
-        total = load_rikishi_list(con, limit=page, skip=skip)
-        skip += page
-        if not total or skip >= total:
-            break
+        load_basho_full(con, bid, divisions=FULL_PULL_DIVISIONS)
+    # rikishi crawl (paged) with embedded history — active and retired are
+    # separate buckets in the API (intai=false/true); both must be crawled or
+    # retired historical wrestlers (the vast majority) are silently missed.
+    page = 1000
+    for intai in (False, True):
+        skip = 0
+        while True:
+            total = load_rikishi_list(con, limit=page, skip=skip, intai=intai)
+            skip += page
+            if not total or skip >= total:
+                break
     log.info("== FULL PULL complete ==")
 
 
@@ -339,8 +370,8 @@ def main():
         if args.test:
             run_test(con)
         elif args.basho:
-            load_basho_full(con, args.basho)
-        elif args.rikishi:
+            load_basho_full(con, args.basho, divisions=FULL_PULL_DIVISIONS)
+        elif args.rikishi is not None:
             load_rikishi_by_id(con, args.rikishi)
         elif args.full:
             if not args.yes_full:

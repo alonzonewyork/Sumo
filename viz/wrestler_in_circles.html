@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Basho in Circles — Sumo Results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#eceae4;-webkit-font-smoothing:antialiased;}
+  *{box-sizing:border-box;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.18);border-radius:5px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// A Basho in Circles — one wrestler per row, one circle per bout day, sorted
+// by descending win record. Sibling in design/build to nflProject's
+// "A History in Circles" (season_in_circles.html) — same vanilla JS/DOM
+// approach (no build step), adapted for sumo: bouts are binary win/loss (no
+// margin), rows are ranked by record instead of chronological, and a
+// tournament's yusho (no single deciding bout) gets a gold star at the row's
+// end instead of a gold-ringed circle.
+// ---------------------------------------------------------------------------
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function mk(ns, tag, a, kids) {
+  const node = ns ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
+  if (a) for (const k in a) {
+    const v = a[k];
+    if (v == null) continue;
+    if (k.slice(0, 2) === 'on' && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'style') node.setAttribute('style', v);
+    else if (k === 'text') node.textContent = v;
+    else node.setAttribute(k, v);
+  }
+  if (kids != null) appendKids(node, kids);
+  return node;
+}
+function appendKids(node, kids) {
+  if (Array.isArray(kids)) { kids.forEach(function (c) { appendKids(node, c); }); return; }
+  if (kids == null || kids === false) return;
+  node.appendChild(typeof kids === 'object' ? kids : document.createTextNode(String(kids)));
+}
+const h = function (tag, a, kids) { return mk(false, tag, a, kids); };
+const s = function (tag, a, kids) { return mk(true, tag, a, kids); };
+
+const BASHO_NAMES = { '01': 'Hatsu', '03': 'Haru', '05': 'Natsu', '07': 'Nagoya', '09': 'Aki', '11': 'Kyushu' };
+
+class App {
+  constructor(root) {
+    this.root = root;
+    this.state = { loaded: false, division: 'Makuuchi', hover: null };
+    this.data = null;
+    this.mount();
+  }
+
+  setState(patch) {
+    const next = typeof patch === 'function' ? patch(this.state) : patch;
+    Object.assign(this.state, next);
+    this.renderAll();
+  }
+
+  showHover(ho) { this.state.hover = ho; this.updateTooltip(); }
+  hideHover() { this.state.hover = null; this.removeTooltip(); }
+
+  mount() {
+    const self = this;
+    window.addEventListener('resize', function () { self.renderAll(); });
+    this.renderAll();
+    fetch('./bouts.json').then(function (r) { return r.json(); }).then(function (data) {
+      self.data = data;
+      self.setState({ loaded: true });
+    }).catch(function (err) { console.error('bouts.json load failed', err); });
+  }
+
+  bashoLabel() {
+    if (!this.data) return '';
+    const ym = this.data.start_date.slice(0, 7);
+    const year = ym.slice(0, 4), month = ym.slice(5, 7);
+    return (BASHO_NAMES[month] || month) + ' Basho · ' + year;
+  }
+
+  renderVals() {
+    const self = this;
+    const loaded = this.state.loaded;
+    if (!loaded) {
+      return {
+        loaded: false, showGrid: false, eyebrow: '', title: 'A Basho in Circles', overall: '', overallLabel: '',
+        descriptionText: '', divOptions: [], rowLabels: [], nodes: [], connectors: [], dividers: [],
+        hover: null, clearHover: function () {}, dims: { w: 900, h: 400 }
+      };
+    }
+
+    const division = this.state.division;
+    const rows = this.data.divisions[division] || [];
+    const mb = (typeof window !== 'undefined' && window.innerWidth <= 640);
+    const S = 31, ROW = 46, X0 = mb ? 118 : 210, Y0 = 40;
+    const NDAYS = 15;
+    const chartW = Math.min((typeof window !== 'undefined' ? window.innerWidth : 1400) - (mb ? 28 : 78), 1400);
+    let COL = Math.max(mb ? 16 : 30, Math.min(52, (chartW - X0 - 24) / NDAYS));
+    const R = Math.min(mb ? 7 : 12, COL * 0.34);
+    const W = X0 + (NDAYS - 1) * COL + 40;
+
+    const nodes = [], connectors = [], dividers = [], rowLabels = [];
+
+    rows.forEach(function (row, ri) {
+      const cy = Y0 + ri * ROW;
+      const pts = [];
+      for (let day = 1; day <= NDAYS; day++) {
+        const cx = X0 + (day - 1) * COL;
+        pts.push(cx + ',' + cy);
+        const d = row.days[day];
+        if (!d) {
+          // kyujo (absence) day -- dashed hollow circle, matching the "bye" treatment
+          nodes.push({
+            cx: cx, cy: cy, r: R * 0.85, fill: 'rgba(0,0,0,0.06)', stroke: 'rgba(60,60,60,0.85)',
+            sw: 1.3, dash: '2.5 2.5', dotR: 0, sideMark: null,
+            onEnter: function () {
+              self.showHover(self.tipFor(cx, cy, row, day, null));
+            }
+          });
+          continue;
+        }
+        const win = d.win;
+        const rgb = win ? '120,192,116' : '224,116,116';
+        const fill = 'rgba(' + rgb + ',0.8)';
+        const stroke = win ? 'rgba(66,146,70,0.85)' : 'rgba(198,72,72,0.9)';
+        // East/West cue mirrors nflProject's home/away dot: filled = East, open = West
+        const isEast = d.side === 'E';
+        nodes.push({
+          cx: cx, cy: cy, r: R, fill: fill, stroke: stroke, sw: 1, dash: 'none',
+          dotR: Math.max(2, Math.min(R * 0.32, 3.2)),
+          dotFill: isEast ? 'rgba(0,0,0,0.42)' : 'none',
+          dotStroke: isEast ? 'none' : 'rgba(0,0,0,0.5)',
+          fusen: d.kimarite === 'fusen',
+          onEnter: function () {
+            self.showHover(self.tipFor(cx, cy, row, day, d));
+          }
+        });
+      }
+      connectors.push({ points: pts.join(' ') });
+
+      rowLabels.push({
+        mid: cy,
+        label: row.name,
+        subLabel: row.rank || '',
+        fontSize: mb ? 11.5 : 14.5,
+        record: row.wins + '–' + row.losses + (row.absences ? '–' + row.absences : ''),
+        yusho: row.yusho
+      });
+    });
+
+    const divOptions = ['Makuuchi', 'Juryo'].map(function (d) {
+      return { label: d, active: d === division, onSelect: function () { self.setState({ division: d, hover: null }); } };
+    });
+
+    const eyebrow = this.bashoLabel() + ' · ' + division;
+    const descriptionText = 'Every ' + division + ' bout, one wrestler per row, sorted by final record (most wins first). ' +
+      'Each circle is one day — green for a win, red for a loss, dashed grey for a kyujo (absence) day. ' +
+      'A filled dot marks an East-side bout, an open ring marks West. Hover any circle for the bout detail.';
+
+    return {
+      loaded: true, showGrid: true,
+      eyebrow: eyebrow, title: 'A Basho in Circles',
+      overall: rows.length + '', overallLabel: division + ' wrestlers',
+      descriptionText: descriptionText,
+      divOptions: divOptions,
+      rowLabels: rowLabels, nodes: nodes, connectors: connectors, dividers: dividers,
+      dims: { w: W, h: Y0 + rows.length * ROW + 20 },
+      hover: this.state.hover,
+      clearHover: function () { self.hideHover(); }
+    };
+  }
+
+  tipFor(cx, cy, row, day, d) {
+    const tipW = 200;
+    let tipLeft = cx + 16;
+    const tipTop = Math.max(4, cy - 60);
+    return {
+      tipLeft: tipLeft, tipTop: tipTop, tipW: tipW,
+      wrestler: row.name, dayText: 'Day ' + day,
+      opp: d ? d.opp : '', oppRank: d ? d.oppRank : '',
+      resultText: !d ? 'Kyujo (absence)' : (d.win ? 'Win' : 'Loss'),
+      accent: !d ? '#8a8478' : (d.win ? '#3f9a52' : '#cf5555'),
+      kimarite: d ? (d.kimarite === 'fusen' ? 'Fusen (walkover)' : d.kimarite) : '',
+      sideText: d ? (d.side === 'E' ? 'East' : 'West') : ''
+    };
+  }
+
+  legend() {
+    const item = function (svgKids, w, label) {
+      return h('div', { style: "display:flex;align-items:center;gap:9px;font:500 12.5px 'Space Grotesk',sans-serif;color:#5c5749;" }, [
+        s('svg', { width: w, height: 22 }, svgKids), label
+      ]);
+    };
+    return h('div', { style: 'display:flex;flex-wrap:wrap;gap:22px 30px;margin:18px 0;padding:14px 18px;background:rgba(255,255,255,0.5);border:1px solid rgba(0,0,0,0.06);border-radius:10px;' }, [
+      item(s('circle', { cx: 11, cy: 11, r: 8, fill: 'rgba(120,192,116,0.8)', stroke: 'rgba(66,146,70,0.85)' }), 22, 'Win'),
+      item(s('circle', { cx: 11, cy: 11, r: 8, fill: 'rgba(224,116,116,0.8)', stroke: 'rgba(198,72,72,0.9)' }), 22, 'Loss'),
+      item(s('circle', { cx: 11, cy: 11, r: 8, fill: 'rgba(0,0,0,0.06)', stroke: 'rgba(60,60,60,0.85)', 'stroke-width': 1.3, 'stroke-dasharray': '2.5 2.5' }), 22, 'Kyujo (absence)'),
+      item([s('circle', { cx: 11, cy: 11, r: 8, fill: 'rgba(140,140,140,0.55)' }), s('circle', { cx: 11, cy: 11, r: 2.6, fill: 'rgba(0,0,0,0.5)' }), s('circle', { cx: 33, cy: 11, r: 8, fill: 'rgba(140,140,140,0.55)' }), s('circle', { cx: 33, cy: 11, r: 2.6, fill: 'none', stroke: 'rgba(0,0,0,0.6)', 'stroke-width': 1 })], 44, 'East / West'),
+      item(s('text', { x: 11, y: 16, 'text-anchor': 'middle', style: "font:700 17px 'Space Grotesk',sans-serif;fill:#c19a2e;" }, '★'), 22, 'Yusho (tournament champion)')
+    ]);
+  }
+
+  buildSizedInner(v) {
+    const labelW = 196, labelPad = 8;
+    const svg = s('svg', { width: v.dims.w, height: v.dims.h, style: 'display:block;overflow:visible;' });
+    const defs = s('defs', {}, s('pattern', { id: 'gdots', width: 31, height: 31, patternUnits: 'userSpaceOnUse' }, s('circle', { cx: 0, cy: 0, r: 1.1, fill: 'rgba(0,0,0,0.13)' })));
+    svg.appendChild(defs);
+    svg.appendChild(s('rect', { x: 0, y: 0, width: v.dims.w, height: v.dims.h, fill: 'url(#gdots)', onClick: v.clearHover }));
+    v.connectors.forEach(function (c) { svg.appendChild(s('polyline', { points: c.points, fill: 'none', stroke: 'rgba(0,0,0,0.16)', 'stroke-width': 1 })); });
+    v.nodes.forEach(function (n) {
+      const g = s('g', { style: 'cursor:pointer;', onMouseEnter: n.onEnter, onMouseLeave: v.clearHover, onClick: function (e) { e.stopPropagation(); n.onEnter(); } });
+      g.appendChild(s('circle', { cx: n.cx, cy: n.cy, r: n.r, fill: n.fill, stroke: n.stroke, 'stroke-width': n.sw, 'stroke-dasharray': n.dash }));
+      if (n.fusen) g.appendChild(s('circle', { cx: n.cx, cy: n.cy, r: n.r + 3, fill: 'none', stroke: 'rgba(0,0,0,0.3)', 'stroke-width': 1, 'stroke-dasharray': '1.5 2' }));
+      if (n.dotR) g.appendChild(s('circle', { cx: n.cx, cy: n.cy, r: n.dotR, fill: n.dotFill, stroke: n.dotStroke, 'stroke-width': 1 }));
+      svg.appendChild(g);
+    });
+
+    const inner = h('div', { style: 'position:relative;width:' + v.dims.w + 'px;height:' + v.dims.h + 'px;' }, svg);
+
+    v.rowLabels.forEach(function (sL) {
+      const kids = [h('div', { style: 'font:700 ' + sL.fontSize + "px 'Space Grotesk',sans-serif;color:#2a271f;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, sL.label)];
+      kids.push(h('div', { style: "font:600 11.5px 'Space Grotesk',sans-serif;color:#4a4638;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, sL.subLabel));
+      kids.push(h('div', { style: "font:500 10.5px 'Space Grotesk',sans-serif;color:#9a9280;margin-top:2px;" }, sL.record + (sL.yusho ? '  ★ YUSHO' : '')));
+      inner.appendChild(h('div', { style: 'position:absolute;left:2px;width:' + labelW + 'px;text-align:right;padding-right:' + labelPad + 'px;top:' + sL.mid + 'px;transform:translateY(-50%);line-height:1.05;' }, kids));
+    });
+    return inner;
+  }
+
+  tooltipNode(hv) {
+    const kids = [
+      h('div', { style: "display:flex;justify-content:space-between;font:600 10px 'Space Grotesk',sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#a49c8a;" }, [
+        h('span', {}, hv.dayText), h('span', {}, hv.sideText)
+      ]),
+      h('div', { style: "font:700 18px 'Space Grotesk',sans-serif;color:#1c1a15;margin:6px 0 1px;" }, hv.wrestler),
+      hv.opp ? h('div', { style: "font:500 13px 'Space Grotesk',sans-serif;color:#4a4638;" }, 'vs ' + hv.opp + (hv.oppRank ? ' (' + hv.oppRank + ')' : '')) : null,
+      h('div', { style: "display:flex;gap:9px;align-items:center;margin-top:8px;font:600 11.5px 'Space Grotesk',sans-serif;" }, [
+        h('span', { style: 'color:' + hv.accent + ';' }, hv.resultText),
+        hv.kimarite ? h('span', { style: 'color:#b3ab98;' }, '· ' + hv.kimarite) : null
+      ])
+    ];
+    return h('div', { style: 'position:absolute;left:' + hv.tipLeft + 'px;top:' + hv.tipTop + 'px;width:' + hv.tipW + 'px;background:rgba(255,255,255,0.98);border:1px solid rgba(0,0,0,0.08);border-left:4px solid ' + hv.accent + ';border-radius:9px;padding:11px 13px;box-shadow:0 8px 26px rgba(0,0,0,0.15);pointer-events:none;z-index:6;' }, kids);
+  }
+
+  updateTooltip() {
+    this.removeTooltip();
+    if (!this.state.hover || !this._sizedInner) return;
+    this._tooltip = this.tooltipNode(this.state.hover);
+    this._sizedInner.appendChild(this._tooltip);
+  }
+  removeTooltip() { if (this._tooltip && this._tooltip.parentNode) this._tooltip.parentNode.removeChild(this._tooltip); this._tooltip = null; }
+
+  renderAll() {
+    const self = this;
+    const v = this.renderVals();
+    const mb = (typeof window !== 'undefined' && window.innerWidth <= 640);
+    const h1Fs = mb ? 27 : 40, ovFs = mb ? 21 : 30;
+
+    const header = h('div', { style: 'display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:6px;' }, [
+      h('div', {}, [
+        h('div', { style: "font:600 11px 'Space Grotesk',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:#a89e86;" }, v.eyebrow),
+        h('h1', { style: 'margin:4px 0 0;font:700 ' + h1Fs + "px 'Space Grotesk',sans-serif;letter-spacing:-.02em;color:#1c1a15;" }, v.title)
+      ]),
+      h('div', { style: 'display:flex;align-items:flex-end;gap:22px;' }, [
+        h('a', { href: '/', style: "display:inline-flex;align-items:center;gap:7px;font:600 12.5px 'Space Grotesk',sans-serif;color:#3a3628;background:#fff;border:1px solid rgba(0,0,0,0.14);border-radius:8px;padding:8px 14px;text-decoration:none;white-space:nowrap;" }, '← Projects'),
+        v.loaded ? h('div', { style: 'text-align:right;' }, [
+          h('div', { style: 'font:700 ' + ovFs + "px 'Space Grotesk',sans-serif;color:#1c1a15;" }, v.overall),
+          h('div', { style: "font:500 11px 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#a89e86;" }, v.overallLabel)
+        ]) : null
+      ])
+    ]);
+
+    let controls = null;
+    if (v.loaded) {
+      controls = h('div', { style: 'display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:20px 0 4px;' }, [
+        h('div', { style: 'display:flex;border:1px solid rgba(0,0,0,0.14);border-radius:8px;overflow:hidden;background:#fff;' },
+          v.divOptions.map(function (o) {
+            return h('div', { style: "padding:8px 16px;font:600 13px 'Space Grotesk',sans-serif;cursor:pointer;user-select:none;white-space:nowrap;background:" + (o.active ? '#26241f' : '#fff') + ';color:' + (o.active ? '#fff' : '#3a3628') + ';', onClick: o.onSelect }, o.label);
+          }))
+      ]);
+    }
+
+    let chartSection;
+    if (v.showGrid) {
+      this._sizedInner = this.buildSizedInner(v);
+      this._scrollContainer = h('div', { style: 'position:relative;width:100%;max-height:760px;overflow:auto;border-radius:8px;' }, this._sizedInner);
+      chartSection = this._scrollContainer;
+      if (this.state.hover) this.updateTooltip();
+    } else {
+      this._scrollContainer = null; this._sizedInner = null;
+      chartSection = h('div', { style: "padding:60px 0;text-align:center;font:500 14px 'Space Grotesk',sans-serif;color:#a89e86;" }, 'Loading basho data…');
+    }
+
+    const inner = h('div', { style: 'max-width:1400px;margin:0;' }, [
+      header,
+      h('p', { style: 'margin:10px 0 0;max-width:680px;font:400 ' + (mb ? '13px/1.5' : '14.5px/1.55') + " 'Space Grotesk',sans-serif;color:#6b6558;" }, v.descriptionText),
+      controls,
+      v.loaded ? this.legend() : null,
+      chartSection
+    ]);
+    const page = h('div', { style: 'min-height:100vh;background:radial-gradient(circle at 30% 0%,#f2f0ea,#e7e5df);padding:' + (mb ? '16px 12px 44px' : '34px 30px 60px') + ";font-family:'Space Grotesk',system-ui,sans-serif;color:#26241f;" }, inner);
+    this.root.replaceChildren(page);
+  }
+}
+
+new App(document.getElementById('app'));
+</script>
+</body>
+</html>
